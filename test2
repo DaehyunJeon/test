@@ -1,0 +1,731 @@
+import tkinter as tk
+from tkinter import ttk, Label, messagebox, filedialog
+from PIL import Image, ImageTk
+import win32com.client
+import pyvisa
+import json
+import os
+import csv
+from datetime import datetime
+
+# COM 객체 생성
+engine = win32com.client.Dispatch("LoaderEngine.LoaderEngine")
+
+root = tk.Tk()
+root.title("RFOptimizer for QORVO")
+root.geometry("800x720")
+
+notebook = ttk.Notebook(root)
+notebook.pack(expand=True, fill="both")
+
+rf_frame = ttk.Frame(notebook)
+notebook.add(rf_frame, text="RF Optimizer")
+pna_frame = ttk.Frame(notebook)
+notebook.add(pna_frame, text="PNA Settings")
+dc_frame = ttk.Frame(notebook)
+notebook.add(dc_frame, text="DC Power Settings")
+program_frame = ttk.Frame(notebook)
+notebook.add(program_frame, text="Program")
+
+# 상단 로고
+try:
+    logo_image = Image.open(r"C:\Users\daehy\OneDrive\Desktop\Python\Python study\Project\logo.png")
+    logo_image = logo_image.resize((120, 40))
+    logo_photo = ImageTk.PhotoImage(logo_image)
+    logo_label = Label(root, image=logo_photo)
+    logo_label.pack(side="top", pady=0)
+except Exception:
+    pass
+
+# RF Optimizer 탭
+rf_log = tk.Text(rf_frame, height=7, width=95)
+rf_log.pack(pady=5, padx=5)
+def rf_log_message(msg):
+    rf_log.insert(tk.END, msg + "\n")
+    rf_log.see(tk.END)
+rf_engine_initialized = False
+
+def check_rf_initialized():
+    if not rf_engine_initialized:
+        rf_log_message("Please RUN Program first.")
+        return False
+    return True
+
+def rf_initialize_engine():
+    global rf_engine_initialized
+    try:
+        result = engine.InitializeEngine("")
+        rf_engine_initialized = True
+        rf_log_message(f"Engine Initialized: {result}")
+    except Exception as e:
+        rf_log_message(f"Error initializing engine: {e}")
+
+def rf_dispose_engine():
+    global rf_engine_initialized
+    try:
+        engine.Dispose()
+        rf_engine_initialized = False
+        rf_log_message("Engine Disposed")
+    except Exception as e:
+        rf_log_message(f"Error disposing engine: {e}")
+
+rf_button_frame = tk.Frame(rf_frame)
+rf_button_frame.pack(pady=5)
+tk.Button(rf_button_frame, text="Start", command=rf_initialize_engine, bg="lightgreen", width=16).pack(side="left", padx=5)
+tk.Button(rf_button_frame, text="Dispose", command=rf_dispose_engine, bg="lightyellow", width=16).pack(side="left", padx=5)
+tk.Button(rf_button_frame, text="END", command=root.quit, bg="red", width=16).pack(side="left", padx=5)
+
+rf_setting_frame = tk.LabelFrame(rf_frame, text="RF Optimizer Setting", padx=10, pady=10)
+rf_setting_frame.pack(fill="x", padx=10, pady=10)
+
+tk.Label(rf_setting_frame, text="Interface:").grid(row=0, column=0)
+rf_interface_var = tk.StringVar(value="RFMDComm2")
+rf_interface_dropdown = ttk.Combobox(rf_setting_frame, textvariable=rf_interface_var, values=["RFMDComm", "RFMDComm2"], width=15)
+rf_interface_dropdown.grid(row=0, column=1, padx=5)
+tk.Button(rf_setting_frame, text="Set", command=lambda: set_rf_interface(), width=10).grid(row=0, column=2, padx=3)
+
+def set_rf_interface():
+    if not check_rf_initialized(): return
+    try:
+        result = engine.SetInterface(rf_interface_var.get())
+        rf_log_message(f"Set Interface: {rf_interface_var.get()} -> {result}")
+    except Exception as e:
+        rf_log_message(f"Error setting interface: {e}")
+
+tk.Label(rf_setting_frame, text="Clock rate:").grid(row=1, column=0)
+rf_frequency_var = tk.StringVar(value="10MHz")
+rf_frequency_dropdown = ttk.Combobox(rf_setting_frame, textvariable=rf_frequency_var, values=["1MHz", "2MHz", "5MHz", "10MHz"], width=15)
+rf_frequency_dropdown.grid(row=1, column=1, padx=5)
+tk.Button(rf_setting_frame, text="Set", command=lambda: set_rf_frequency(), width=10).grid(row=1, column=2, padx=3)
+
+def set_rf_frequency():
+    if not check_rf_initialized(): return
+    freq_map = {"1MHz": 1000000, "2MHz": 2000000, "5MHz": 5000000, "10MHz": 10000000}
+    try:
+        engine.Frequency_Hz = freq_map.get(rf_frequency_var.get(), 10000000)
+        rf_log_message(f"Set Frequency: {engine.Frequency_Hz} Hz")
+    except Exception as e:
+        rf_log_message(f"Error setting frequency: {e}")
+
+tk.Label(rf_setting_frame, text="Chipset:").grid(row=2, column=0)
+rf_chipset_var = tk.StringVar()
+rf_chipset_dropdown = ttk.Combobox(rf_setting_frame, textvariable=rf_chipset_var, width=15)
+rf_chipset_dropdown.grid(row=2, column=1, padx=5)
+tk.Button(rf_setting_frame, text="Load", command=lambda: load_rf_chipsets(), width=10).grid(row=2, column=2, padx=3)
+tk.Button(rf_setting_frame, text="Set", command=lambda: set_rf_chipset(), width=10).grid(row=2, column=3, padx=3)
+
+def load_rf_chipsets():
+    if not check_rf_initialized(): return
+    try:
+        chipsets = engine.GetChipsetNamesAvailable()
+        rf_chipset_dropdown["values"] = list(chipsets)
+        rf_log_message("Chipset list loaded.")
+    except Exception as e:
+        rf_log_message(f"Error loading chipsets: {e}")
+
+def set_rf_chipset():
+    if not check_rf_initialized(): return
+    try:
+        engine.ActiveChipset = rf_chipset_var.get()
+        rf_log_message(f"Set Chipset: {rf_chipset_var.get()}")
+    except Exception as e:
+        rf_log_message(f"Error setting chipset: {e}")
+
+tk.Label(rf_setting_frame, text="Family:").grid(row=3, column=0)
+rf_family_var = tk.StringVar()
+rf_family_dropdown = ttk.Combobox(rf_setting_frame, textvariable=rf_family_var, width=15)
+rf_family_dropdown.grid(row=3, column=1, padx=5)
+tk.Button(rf_setting_frame, text="Load", command=lambda: load_rf_families(), width=10).grid(row=3, column=2, padx=3)
+tk.Button(rf_setting_frame, text="Set", command=lambda: set_rf_family(), width=10).grid(row=3, column=3, padx=3)
+
+def load_rf_families():
+    if not check_rf_initialized(): return
+    try:
+        families = engine.GetFamilyNamesOfCurrentChipset()
+        rf_family_dropdown["values"] = list(families)
+        rf_log_message("Family list loaded.")
+    except Exception as e:
+        rf_log_message(f"Error loading families: {e}")
+
+def set_rf_family():
+    if not check_rf_initialized(): return
+    try:
+        engine.ActiveFamily = rf_family_var.get()
+        rf_log_message(f"Set Family: {rf_family_var.get()}")
+    except Exception as e:
+        rf_log_message(f"Error setting family: {e}")
+
+tk.Label(rf_setting_frame, text="USID:").grid(row=4, column=0)
+rf_usid_var = tk.StringVar(value="default")
+rf_usid_dropdown = ttk.Combobox(rf_setting_frame, textvariable=rf_usid_var, values=["default"] + [str(i) for i in range(1, 21)], width=15)
+rf_usid_dropdown.grid(row=4, column=1, padx=5)
+tk.Button(rf_setting_frame, text="Set", command=lambda: set_rf_usid(), width=10).grid(row=4, column=2, padx=3)
+
+def set_rf_usid():
+    if not check_rf_initialized(): return
+    try:
+        if rf_usid_var.get() == "default":
+            rf_log_message(f"Current Slave Address: {engine.SlaveAddress}")
+        else:
+            engine.SetSlaveAddress(int(rf_usid_var.get()))
+            rf_log_message(f"Set Slave Address: {rf_usid_var.get()}")
+    except Exception as e:
+        rf_log_message(f"Error setting USID: {e}")
+
+register_frame = tk.LabelFrame(rf_frame, text="Register Write (Value=Dec.)", padx=10, pady=10)
+register_frame.pack(fill="x", padx=10, pady=10)
+register_entries = []
+register_values = []
+for i in range(10):
+    tk.Label(register_frame, text=f"Register {i+1} Addr=").grid(row=i, column=0, sticky="w")
+    entry = tk.Entry(register_frame, width=13)
+    entry.grid(row=i, column=1)
+    register_entries.append(entry)
+    tk.Label(register_frame, text="Value=").grid(row=i, column=2)
+    value_entry = tk.Entry(register_frame, width=13)
+    value_entry.grid(row=i, column=3)
+    register_values.append(value_entry)
+tk.Button(register_frame, text="Write All Register", command=lambda: rf_write_registers(), width=30).grid(row=11, column=0, columnspan=4, pady=7)
+
+def rf_write_registers():
+    if not check_rf_initialized():
+        return
+    if not engine.ActiveChipset or not engine.ActiveFamily:
+        rf_log_message("Please set Chipset and Family before writing registers.")
+        return
+    for entry, value_entry in zip(register_entries, register_values):
+        register_name = entry.get().strip()
+        register_value = value_entry.get().strip()
+        if not register_name or not register_value: continue
+        if not register_name.lower().startswith("reg"):
+            register_name = f"Reg{register_name}"
+        try:
+            register_value = int(register_value) if register_value.isdigit() else 0
+            result = engine.WriteRegister(register_name, register_value)
+            rf_log_message(f"{register_name}: Write {'Success' if result else 'Fail'}")
+            read_value = engine.ReadRegister2(register_name)
+            rf_log_message(f"Register Read: {register_name} -> 0x{read_value:X}")
+        except Exception as e:
+            rf_log_message(f"Error writing {register_name}: {e}")
+
+# ------------------ PNA Settings 탭 ------------------
+pna_log = tk.Text(pna_frame, height=6, width=95)
+pna_log.pack(pady=5, padx=5)
+def pna_log_message(msg):
+    pna_log.insert(tk.END, msg + "\n")
+    pna_log.see(tk.END)
+
+pna_setting_frame = tk.LabelFrame(pna_frame, text="PNA Settings", padx=10, pady=10)
+pna_setting_frame.pack(fill="x", padx=10, pady=10)
+
+tk.Label(pna_setting_frame, text="GPIB Address:").grid(row=0, column=0)
+gpib_entry = tk.Entry(pna_setting_frame)
+gpib_entry.grid(row=0, column=1)
+tk.Label(pna_setting_frame, text="Channel:").grid(row=1, column=0)
+channel_entry = tk.Entry(pna_setting_frame)
+channel_entry.grid(row=1, column=1)
+tk.Label(pna_setting_frame, text="S-Parameter:").grid(row=2, column=0)
+sparam_entry = tk.Entry(pna_setting_frame)
+sparam_entry.grid(row=2, column=1)
+tk.Label(pna_setting_frame, text="Trace:").grid(row=3, column=0)
+trace_entry = tk.Entry(pna_setting_frame)
+trace_entry.grid(row=3, column=1)
+tk.Label(pna_setting_frame, text="Format:").grid(row=4, column=0)
+format_combo = ttk.Combobox(pna_setting_frame, values=["MLOG", "SWR", "PHAS", "REAL", "IMAG"])
+format_combo.grid(row=4, column=1)
+format_combo.current(0)
+tk.Label(pna_setting_frame, text="Marker Freq (MHz):").grid(row=5, column=0)
+marker_entry = tk.Entry(pna_setting_frame)
+marker_entry.grid(row=5, column=1)
+
+def apply_pna_settings():
+    gpib_addr = gpib_entry.get()
+    channel = channel_entry.get()
+    sparam = sparam_entry.get()
+    trace = trace_entry.get()
+    meas_name = f"CH{channel}_S{sparam}_{trace}"
+    format_selected = format_combo.get()
+    try:
+        marker_freq_mhz = float(marker_entry.get())
+        marker_freq_hz = marker_freq_mhz * 1e6
+    except Exception:
+        pna_log_message("Invalid marker frequency input")
+        return
+    try:
+        rm = pyvisa.ResourceManager()
+        instrument = rm.open_resource(f'GPIB0::{gpib_addr}::INSTR')
+        instrument.write('*RST')
+        instrument.write('CALC1:PAR:DEL:ALL')
+        instrument.write(f'CALC1:PAR:DEF:EXT "{meas_name}","S{sparam}"')
+        instrument.write(f'DISP:WIND:TRAC1:FEED "{meas_name}"')
+        instrument.write(f'CALC1:PAR:SEL {meas_name}')
+        instrument.write(f'CALC1:FORM {format_selected}')
+        instrument.write('CALC1:MARK1:STAT ON')
+        instrument.write(f'CALC1:MARK1:X {marker_freq_hz}')
+        instrument.query('*OPC?')
+        pna_log_message("PNA settings applied successfully")
+    except Exception as e:
+        pna_log_message(f"Error applying PNA settings: {e}")
+
+apply_btn = tk.Button(pna_setting_frame, text="PNA 설정", command=apply_pna_settings)
+apply_btn.grid(row=6, column=0, columnspan=2, pady=10)
+
+# ---------------- DC Power Settings 탭 ----------------
+ps_log = tk.Text(dc_frame, height=5, width=95)
+ps_log.pack(pady=5, padx=5)
+def ps_log_message(msg):
+    ps_log.insert(tk.END, msg + "\n")
+    ps_log.see(tk.END)
+
+device_options = ["E3631A", "E3634A"]
+source_options = {
+    "E3631A": ["P6V", "P25V"],
+    "E3634A": ["P25V", "P50V"]
+}
+selected_devices = [tk.StringVar() for _ in range(5)]
+selected_sources = [tk.StringVar() for _ in range(5)]
+gpib_addresses = [tk.StringVar() for _ in range(5)]
+current_limits = [tk.StringVar() for _ in range(5)]
+default_voltages = [tk.StringVar() for _ in range(5)]
+connection_labels = []
+source_dropdowns = []
+def validate_numeric_input(value):
+    return value.isdigit() or value == ""
+ps_validate_cmd = root.register(validate_numeric_input)
+
+def update_source_options(event, ch):
+    selected_device = selected_devices[ch].get()
+    if selected_device in source_options:
+        source_dropdowns[ch]["values"] = source_options[selected_device]
+
+def apply_ps_settings():
+    rm = pyvisa.ResourceManager()
+    for ch in range(5):
+        gpib_address = gpib_addresses[ch].get()
+        device_name = selected_devices[ch].get()
+        source_name = selected_sources[ch].get()
+        current_limit = current_limits[ch].get()
+        default_voltage = default_voltages[ch].get()
+        if not gpib_address or not device_name or not source_name or not default_voltage or not current_limit:
+            ps_log_message(f"⚠ CH{ch+1}: 설정값이 입력되지 않아 건너뜀")
+            continue
+        try:
+            instrument = rm.open_resource(f"GPIB::{gpib_address}::INSTR")
+            if device_name == "E3631A":
+                instrument.write(f"APPL {source_name}, {default_voltage}, {current_limit}")
+            elif device_name == "E3634A":
+                instrument.write(f"VOLT:RANG {source_name}")
+                instrument.write(f"VOLT {default_voltage}")
+                instrument.write(f"CURR {current_limit}")
+            connection_labels[ch].config(text=f"CH{ch+1} 설정 완료!", fg="green")
+            ps_log_message(f"CH{ch+1} 설정 완료!")
+        except Exception as e:
+            connection_labels[ch].config(text=f"연결 실패: {e}", fg="red")
+            ps_log_message(f"CH{ch+1} 연결 실패: {e}")
+
+for ch in range(5):
+    frame = tk.Frame(dc_frame)
+    frame.pack(pady=2)
+    tk.Label(frame, text=f"Ch{ch+1}").pack(side="left")
+    tk.Label(frame, text="장비 선택:").pack(side="left")
+    device_dropdown = ttk.Combobox(frame, textvariable=selected_devices[ch], values=device_options, width=8)
+    device_dropdown.pack(side="left", padx=2)
+    device_dropdown.bind("<<ComboboxSelected>>", lambda event, ch=ch: update_source_options(event, ch))
+    tk.Label(frame, text="소스 선택:").pack(side="left")
+    source_dropdown = ttk.Combobox(frame, textvariable=selected_sources[ch], width=8)
+    source_dropdown.pack(side="left", padx=2)
+    source_dropdowns.append(source_dropdown)
+    tk.Label(frame, text="GPIB 주소:").pack(side="left")
+    gpib_entry_ps = tk.Entry(frame, textvariable=gpib_addresses[ch], width=5, validate="key", validatecommand=(ps_validate_cmd, "%P"))
+    gpib_entry_ps.pack(side="left", padx=2)
+    gpib_entry_ps.insert(0, str(ch + 1))
+    tk.Label(frame, text="전류(A):").pack(side="left")
+    current_entry = tk.Entry(frame, textvariable=current_limits[ch], width=5)
+    current_entry.pack(side="left", padx=2)
+    current_entry.insert(0, "1.0")
+    tk.Label(frame, text="전압(V):").pack(side="left")
+    default_voltage_entry = tk.Entry(frame, textvariable=default_voltages[ch], width=5)
+    default_voltage_entry.pack(side="left", padx=2)
+    default_voltage_entry.insert(0, "3.8")
+    conn_status = tk.Label(frame, text="설정 대기 중", fg="gray")
+    conn_status.pack(side="left", padx=10)
+    connection_labels.append(conn_status)
+btn_apply_settings = tk.Button(dc_frame, text="Power Supply 설정", command=apply_ps_settings)
+btn_apply_settings.pack(side="top", pady=10)
+
+# -------------- Program(체크박스 트리뷰 구현) ----------------
+PROGRAM_FILE = "rf_programs.json"
+program_checks = {}
+
+# Treeview for Program List (check-style)
+check_tree = ttk.Treeview(program_frame, show="tree", height=10, selectmode="browse")
+check_tree.grid(row=1, column=0, rowspan=7, padx=10, pady=10, sticky="ns")
+
+def load_all_programs():
+    if not os.path.exists(PROGRAM_FILE): return []
+    with open(PROGRAM_FILE,"r",encoding="utf-8") as f: return json.load(f)
+def save_all_programs(programs):
+    with open(PROGRAM_FILE,"w",encoding="utf-8") as f: json.dump(programs, f, ensure_ascii=False, indent=2)
+
+def refresh_program_tree():
+    check_tree.delete(*check_tree.get_children())
+    program_checks.clear()
+    for prog in load_all_programs():
+        name = prog.get('name', '')
+        program_checks[name] = False
+        check_tree.insert('', 'end', iid=name, text=f"[ ] {name}")
+
+def on_tree_click(event):
+    region = check_tree.identify("region", event.x, event.y)
+    if region != "tree": return
+    item_id = check_tree.identify_row(event.y)
+    if not item_id: return
+    # 토글
+    program_checks[item_id] = not program_checks[item_id]
+    checked = "[✓]" if program_checks[item_id] else "[ ]"
+    check_tree.item(item_id, text=f"{checked} {item_id}")
+
+check_tree.bind("<Button-1>", on_tree_click)
+
+def get_checked_program_names():
+    return [k for k, v in program_checks.items() if v]
+
+def refresh_program_list():
+    refresh_program_tree()
+refresh_program_list()
+
+setting_preview_frame = tk.LabelFrame(program_frame, text="설정 미리보기")
+setting_preview_frame.grid(row=1, column=3, rowspan=10, padx=20, pady=10, sticky="nsw")
+def display_setting_preview(data):
+    for widget in setting_preview_frame.winfo_children():
+        widget.destroy()
+    rf = data.get("rf", {})
+    regs = [r for r in rf.get("registers", []) if r[0] or r[1]]
+    tk.Label(setting_preview_frame, text="Register", relief="raised", width=34, anchor="w", bg="#f0f0f0").grid(row=0, column=0, columnspan=2, sticky="we")
+    for i, (addr, val) in enumerate(regs):
+        tk.Label(setting_preview_frame, text=addr, anchor="w", width=12, borderwidth=1, relief="solid").grid(row=i+1, column=0)
+        tk.Label(setting_preview_frame, text=val, anchor="w", width=22, borderwidth=1, relief="solid").grid(row=i+1, column=1)
+    r_row = len(regs) + 1
+    tk.Label(setting_preview_frame, text="DC Power", relief="raised", width=34, anchor="w", bg="#f0f0f0").grid(row=r_row, column=0, columnspan=2, sticky="we")
+    power = data.get("power", [{}]*5)
+    for ch, pd in enumerate(power):
+        info = ""
+        if pd.get("device"):
+            info = f"{pd['device']},{pd['source']},{pd['voltage']}V,{pd['current']}A"
+        tk.Label(setting_preview_frame, text=f"Ch{ch+1}", anchor="w", borderwidth=1, relief="solid", width=12).grid(row=r_row+ch+1, column=0)
+        tk.Label(setting_preview_frame, text=info, anchor="w", borderwidth=1, relief="solid", width=22).grid(row=r_row+ch+1, column=1)
+    d_row = r_row + 6
+    tk.Label(setting_preview_frame, text="PNA", relief="raised", width=34, anchor="w", bg="#f0f0f0").grid(row=d_row, column=0, columnspan=2, sticky="we")
+    pna = data.get("pna", {})
+    pna_labels = ["GPIB Addr", "Ch", "Trace", "Format", "S-parameter", "Marker Freq"]
+    pna_keys = ["gpib", "channel", "trace", "format", "sparam", "marker"]
+    for i, (lbl, key) in enumerate(zip(pna_labels, pna_keys)):
+        tk.Label(setting_preview_frame, text=lbl, anchor="w", borderwidth=1, relief="solid", width=12).grid(row=d_row+i+1, column=0)
+        tk.Label(setting_preview_frame, text=pna.get(key, ""), anchor="w", borderwidth=1, relief="solid", width=22).grid(row=d_row+i+1, column=1)
+
+program_name_var = tk.StringVar()
+tk.Label(program_frame, text="Program Name:").grid(row=1, column=1, sticky="e")
+tk.Entry(program_frame, textvariable=program_name_var, width=20).grid(row=1, column=2, sticky="w")
+btn_save = tk.Button(program_frame, text="SAVE (설정저장)", width=18)
+btn_save.grid(row=2, column=2, sticky="w", pady=2)
+btn_load = tk.Button(program_frame, text="LOAD (불러오기)", width=18)
+btn_load.grid(row=3, column=2, sticky="w", pady=2)
+btn_rename = tk.Button(program_frame, text="이름 변경 (수정)", width=18)
+btn_rename.grid(row=4, column=2, sticky="w", pady=2)
+btn_delete = tk.Button(program_frame, text="삭제", fg="red", width=18)
+btn_delete.grid(row=5, column=2, sticky="w", pady=2)
+
+def save_current_program():
+    name = program_name_var.get().strip()
+    if not name:
+        messagebox.showwarning("경고", "프로그램 이름을 입력하세요.")
+        return
+    rf_data = dict(
+        interface=rf_interface_var.get(),
+        clock=rf_frequency_var.get(),
+        chipset=rf_chipset_var.get(),
+        family=rf_family_var.get(),
+        usid=rf_usid_var.get(),
+        registers=[(e.get(), v.get()) for e, v in zip(register_entries,register_values)]
+    )
+    pna_data = dict(
+        gpib=gpib_entry.get(),
+        channel=channel_entry.get(),
+        sparam=sparam_entry.get(),
+        trace=trace_entry.get(),
+        format=format_combo.get(),
+        marker=marker_entry.get()
+    )
+    power_data = []
+    for ch in range(5):
+        power_data.append({
+            "device": selected_devices[ch].get(),
+            "source": selected_sources[ch].get(),
+            "gpib": gpib_addresses[ch].get(),
+            "current": current_limits[ch].get(),
+            "voltage": default_voltages[ch].get()
+        })
+    sets = load_all_programs()
+    sets = [s for s in sets if s["name"] != name]
+    sets.append({"name":name, "rf":rf_data, "pna":pna_data, "power":power_data})
+    save_all_programs(sets)
+    refresh_program_list()
+    messagebox.showinfo("완료", f'"{name}" 저장됨!')
+
+btn_save.config(command=save_current_program)
+
+def on_tree_select(event):
+    sels = check_tree.selection()
+    if sels:
+        name = sels[0]
+        program_name_var.set(name)
+        for prog in load_all_programs():
+            if prog["name"] == name:
+                display_setting_preview(prog)
+check_tree.bind("<<TreeviewSelect>>", on_tree_select)
+
+def get_selected_program_name():
+    sels = check_tree.selection()
+    if sels:
+        return sels[0]
+    return None
+
+def load_selected_program():
+    name = get_selected_program_name()
+    if not name:
+        messagebox.showwarning("경고", "불러올 설정을 선택하세요.")
+        return
+    sets = load_all_programs()
+    found = next((s for s in sets if s["name"]==name), None)
+    if not found:
+        messagebox.showerror("오류", "설정 정보를 찾을 수 없습니다.")
+        return
+    rf = found['rf']
+    rf_interface_var.set(rf.get('interface',""))
+    rf_frequency_var.set(rf.get('clock',""))
+    rf_chipset_var.set(rf.get('chipset',""))
+    rf_family_var.set(rf.get('family',""))
+    rf_usid_var.set(rf.get('usid',""))
+    regdata = rf.get("registers", [])
+    for i in range(len(register_entries)):
+        try:
+            register_entries[i].delete(0, tk.END)
+            register_values[i].delete(0, tk.END)
+            if i < len(regdata):
+                entry, val = regdata[i]
+                register_entries[i].insert(0, entry)
+                register_values[i].insert(0, val)
+        except Exception: pass
+    pna = found['pna']
+    gpib_entry.delete(0, tk.END); gpib_entry.insert(0, pna.get("gpib",""))
+    channel_entry.delete(0, tk.END); channel_entry.insert(0, pna.get("channel",""))
+    sparam_entry.delete(0, tk.END); sparam_entry.insert(0, pna.get("sparam",""))
+    trace_entry.delete(0, tk.END); trace_entry.insert(0, pna.get("trace",""))
+    format_combo.set(pna.get("format","MLOG"))
+    marker_entry.delete(0, tk.END); marker_entry.insert(0, pna.get("marker",""))
+    power = found['power']
+    for i,ch in enumerate(power):
+        selected_devices[i].set(ch.get("device",""))
+        selected_sources[i].set(ch.get("source",""))
+        gpib_addresses[i].set(ch.get("gpib",""))
+        current_limits[i].set(ch.get("current",""))
+        default_voltages[i].set(ch.get("voltage",""))
+    program_name_var.set(found["name"])
+    display_setting_preview(found)
+    messagebox.showinfo("완료", f'"{name}" 불러오기 완료!')
+btn_load.config(command=load_selected_program)
+
+def rename_selected_program():
+    old_name = get_selected_program_name()
+    new_name = program_name_var.get().strip()
+    if not old_name:
+        messagebox.showwarning("경고", "이름을 변경할 설정을 선택하세요.")
+        return
+    if not new_name:
+        messagebox.showwarning("경고", "새 이름을 입력하세요.")
+        return
+    sets = load_all_programs()
+    if any(s["name"]==new_name for s in sets):
+        messagebox.showwarning("경고", "이미 존재하는 이름입니다.")
+        return
+    found = next((s for s in sets if s["name"]==old_name), None)
+    if not found:
+        messagebox.showerror("오류", "설정 정보를 찾을 수 없습니다.")
+        return
+    found["name"] = new_name
+    save_all_programs(sets)
+    refresh_program_list()
+    program_name_var.set(new_name)
+    messagebox.showinfo("완료", f'"{old_name}" → "{new_name}" 이름 변경!')
+btn_rename.config(command=rename_selected_program)
+
+def delete_selected_program():
+    name = get_selected_program_name()
+    if not name:
+        messagebox.showwarning("경고", "삭제할 설정을 선택하세요.")
+        return
+    if not messagebox.askyesno("삭제확인", f'"{name}" 프로그램을 삭제하시겠습니까?'):
+        return
+    sets = load_all_programs()
+    sets = [s for s in sets if s["name"] != name]
+    save_all_programs(sets)
+    refresh_program_list()
+    program_name_var.set("")
+    display_setting_preview({'rf': {'registers': []}, 'power': [{}]*5, 'pna': {}})
+    messagebox.showinfo("삭제", f'"{name}" 삭제 완료!')
+btn_delete.config(command=delete_selected_program)
+
+# SnP 체크 박스
+save_snp_var = tk.BooleanVar(value=False)
+chk_snp = tk.Checkbutton(program_frame, text="SnP 저장", variable=save_snp_var)
+chk_snp.grid(row=10, column=2, pady=0, sticky="w")
+
+test_log = tk.Text(program_frame, height=8, width=70)
+test_log.grid(row=12, column=0, columnspan=4, padx=10, pady=10)
+def test_log_message(msg):
+    test_log.insert(tk.END, msg + "\n")
+    test_log.see(tk.END)
+
+test_log_records = []
+
+btn_test = tk.Button(program_frame, text="테스트 시작", fg="blue", width=18)
+btn_test.grid(row=11, column=2, sticky="w", pady=2)
+
+def run_program_test():
+    checked_names = get_checked_program_names()
+    if not checked_names:
+        messagebox.showwarning("경고", "테스트할 설정을 체크하세요.")
+        return
+
+    global test_log_records
+    test_log_records = []
+
+    sets = load_all_programs()
+    name_to_prog = {s["name"]: s for s in sets}
+    success_cnt = 0
+
+    for prog_name in checked_names:
+        prog = name_to_prog.get(prog_name)
+        if not prog:
+            test_log_message(f"⚠️ [{prog_name}] 정보가 없음, 제외")
+            continue
+
+        start_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        rf = prog['rf']
+        pna = prog['pna']
+        power = prog['power']
+        log_row = [start_time, prog_name]
+
+        test_log_message(f"==== [ {prog_name} 테스트 시작 ] ====")
+        reg_result = ""
+        power_result = ""
+        pna_result = ""
+
+        try:
+            engine.ActiveChipset = rf.get("chipset", "")
+            engine.ActiveFamily = rf.get("family", "")
+            reg_ok, reg_fail = 0, 0
+            for addr, val in [r for r in rf.get("registers", []) if r[0] or r[1]]:
+                if addr.strip() and val.strip():
+                    regname = addr if addr.lower().startswith("reg") else f"Reg{addr}"
+                    regval = int(val) if val and str(val).isdigit() else 0
+                    result = engine.WriteRegister(regname, regval)
+                    if result: reg_ok += 1
+                    else: reg_fail += 1
+            reg_result = f"Success:{reg_ok}, Fail:{reg_fail}"
+            test_log_message(f"[{prog_name}] Register: {reg_result}")
+        except Exception as e:
+            reg_result = f"Error: {e}"
+
+        try:
+            rm = pyvisa.ResourceManager()
+            pow_ok = 0
+            for ch, conf in enumerate(power):
+                if not conf.get("device"): continue
+                instr = rm.open_resource(f"GPIB::{conf['gpib']}::INSTR")
+                instr.write("*RST")
+                device = conf['device']
+                source = conf['source']
+                val = conf['voltage']
+                curr = conf['current']
+                if device == "E3631A":
+                    instr.write(f"APPL {source}, {val}, {curr}")
+                    instr.write("OUTP ON")
+                elif device == "E3634A":
+                    instr.write(f"VOLT:RANG {source}")
+                    instr.write(f"VOLT {val}")
+                    instr.write(f"CURR {curr}")
+                    instr.write("OUTP ON")
+                pow_ok += 1
+            power_result = f"{pow_ok}CH OK"
+            test_log_message(f"[{prog_name}] Power: {power_result}")
+        except Exception as e:
+            power_result = f"Error: {e}"
+
+        try:
+            instr = rm.open_resource(f"GPIB0::{pna['gpib']}::INSTR")
+            instr.write('*RST')
+            meas_name = f"CH{pna['channel']}_S{pna['sparam']}_{pna['trace']}"
+            instr.write('CALC1:PAR:DEL:ALL')
+            instr.write(f'CALC1:PAR:DEF:EXT "{meas_name}","S{pna["sparam"]}"')
+            instr.write(f'DISP:WIND:TRAC1:FEED "{meas_name}"')
+            instr.write(f'CALC1:PAR:SEL {meas_name}')
+            instr.write(f'CALC1:FORM {pna["format"]}')
+            instr.write('CALC1:MARK1:STAT ON')
+            marker_freq_hz = float(pna['marker']) * 1e6
+            instr.write(f'CALC1:MARK1:X {marker_freq_hz}')
+            instr.query('*OPC?')
+            marker_data = instr.query('CALC1:MARK1:Y?')
+            pna_result = f"Marker: {marker_data.strip()}"
+            test_log_message(f"[{prog_name}] {pna_result}")
+
+            # SnP 저장 체크 시 동작
+            if save_snp_var.get():
+                now = datetime.now().strftime("%Y%m%d_%H%M%S")
+                fname = f"PNA_CH{pna['channel']}_Marker{pna['marker']}MHz_{now}.s2p"
+                pc_savefile = os.path.join(os.path.expanduser("~"), "Desktop", fname)
+                pna_tempfile = f"D:\\temp_{now}.s2p"
+                instr.write(f'MMEM:STOR:SNP "{pna_tempfile}", CH{pna["channel"]}')
+                instr.write(f"MMEM:TRAN? '{pna_tempfile}'")
+                s2p_bytes = instr.read_raw()
+                # Binary block header 제거
+                if s2p_bytes[0:1] == b"#":
+                    hlen = int(s2p_bytes[1:2])
+                    skip = 2 + hlen
+                    s2p_bytes = s2p_bytes[skip:]
+                with open(pc_savefile, "wb") as f:
+                    f.write(s2p_bytes)
+                test_log_message(f"SnP 파일 저장 완료: {pc_savefile}")
+
+        except Exception as e:
+            pna_result = f"Error: {e}"
+            test_log_message(f"PNA 설정/Marker/SnP 오류: {e}")
+
+        log_row.extend([reg_result, power_result, pna_result])
+        test_log_records.append(log_row)
+        test_log_message(f"==== [ {prog_name} 테스트 끝 ] ====")
+        success_cnt += 1
+
+    test_log_message(f"\n--- 전체 {success_cnt}/{len(checked_names)}개 테스트 완료 ---")
+
+btn_test.config(command=run_program_test)
+
+def save_test_log_csv():
+    if not test_log_records:
+        messagebox.showwarning("경고", "저장할 테스트 로그가 없습니다.")
+        return
+    file_name = "test_log_" + datetime.now().strftime("%Y%m%d_%H%M%S") + ".csv"
+    columns = ["Datetime", "Program", "RegisterResult", "PowerResult", "PNAResult"]
+    try:
+        with open(file_name, "w", newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(columns)
+            writer.writerows(test_log_records)
+        messagebox.showinfo("완료", f"CSV 저장 완료!\n{file_name}")
+    except Exception as e:
+        messagebox.showerror("오류", f"CSV 저장 실패: {e}")
+
+btn_save_log = tk.Button(program_frame, text="LOG CSV 저장", command=save_test_log_csv, width=18)
+btn_save_log.grid(row=11, column=3, sticky="w", pady=2)
+
+root.mainloop()
